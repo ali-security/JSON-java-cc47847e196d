@@ -4,15 +4,21 @@
 name: Java CI with Maven
 
 on:
-  push:
-    # branches: [ master ]
-  pull_request:
-    branches: [ master ]
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional surefire -Dtest filter'
+        required: false
+        default: ''
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      MAVEN_OPTS: -Xss4m
     strategy:
+      fail-fast: false
       matrix:
         # build against supported Java LTS versions:
         java: [ 8, 11, 17 ]
@@ -29,7 +35,11 @@ jobs:
         run: mvn clean compile -Dmaven.compiler.source=${{ matrix.java }} -Dmaven.compiler.target=${{ matrix.java }} -Dmaven.test.skip=true -Dmaven.site.skip=true -Dmaven.javadoc.skip=true
       - name: Run Tests ${{ matrix.java }}
         run: |
-          mvn test -Dmaven.compiler.source=${{ matrix.java }} -Dmaven.compiler.target=${{ matrix.java }}
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            mvn test -Dmaven.compiler.source=${{ matrix.java }} -Dmaven.compiler.target=${{ matrix.java }} -DargLine=-Xss512k -Dtest="${{ inputs.test-filter }}" -DfailIfNoTests=false
+          else
+            mvn test -Dmaven.compiler.source=${{ matrix.java }} -Dmaven.compiler.target=${{ matrix.java }} -DargLine=-Xss512k
+          fi
       - name: Build Test Report ${{ matrix.java }}
         if: ${{ always() }}
         run: |
@@ -37,13 +47,23 @@ jobs:
           mvn site -DgenerateReports=false -Dmaven.compiler.source=${{ matrix.java }} -Dmaven.compiler.target=${{ matrix.java }}
       - name: Upload Test Results ${{ matrix.java }}
         if: ${{ always() }}
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v4
         with:
           name: Test Results ${{ matrix.java }}
           path: target/surefire-reports/
       - name: Upload Test Report ${{ matrix.java }}
         if: ${{ always() }}
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v4
         with:
           name: Test Report ${{ matrix.java }}
           path: target/site/
+      - name: Package release JAR
+        if: matrix.java == '8'
+        run: mvn package -Dmaven.test.skip=true -Dmaven.javadoc.skip=true
+      - name: Upload release JAR
+        if: matrix.java == '8'
+        uses: actions/upload-artifact@v4
+        with:
+          name: json-release-jar
+          path: target/json-*[0-9].jar
+          if-no-files-found: error
